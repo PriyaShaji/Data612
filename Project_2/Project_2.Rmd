@@ -1,0 +1,329 @@
+---
+title: "Project 2 | Content-Based and Collaborative Filtering"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: tango
+---
+
+
+```{r knitr_init, echo=FALSE, cache=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+
+# Objective
+
+From an existing dataset of user-item ratings, such as our toy books dataset, MovieLens, Jester [http://eigentaste.berkeley.edu/dataset/] or another dataset of your choosing. Implement at least two of these recommendation algorithms:
+
+• Content-Based Filtering
+
+• User-User Collaborative Filtering
+
+• Item-Item Collaborative Filtering
+
+You should evaluate and compare different approaches, using different algorithms, normalization techniques, similarity methods, neighborhood sizes, etc. You don’t need to be exhaustive—these are just some suggested possibilities.
+
+
+# Data Loading and Data Preparation
+
+## Load the Libraries
+
+```{r echo=TRUE}
+library(recommenderlab)
+library(reshape2)
+library(RCurl)
+library(pander)
+library(ggplot2)
+library(knitr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+```
+
+
+## Load the Data
+
+The data set is from MovieLens project and it was downloaded from 
+[Movie Lens] (https://grouplens.org/datasets/movielens/)
+
+
+```{r echo=TRUE}
+ratings <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/ratings.csv") 
+
+movies <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/movies.csv")
+
+```
+
+```{r echo=TRUE}
+knitr::kable(head(movies))
+knitr::kable(head(ratings))
+```
+
+
+## Convert to Matrix
+
+```{r echo=TRUE}
+Movie_Matrix <- ratings %>%
+  select(-timestamp) %>%
+  spread(movieId, rating)
+
+row.names(Movie_Matrix) <- Movie_Matrix[,1]
+
+Movie_Matrix <- Movie_Matrix[-c(1)]
+Movie_Matrix <- as(as.matrix(Movie_Matrix), "realRatingMatrix")
+
+Movie_Matrix
+```
+
+
+Our movie matrix contains 610 users and 9,724 items/movies.
+
+## Data Preparation
+
+Let us examine the distribution of the ratings dataset
+
+```{r echo=TRUE}
+Ratings_distribution <- as.vector(Movie_Matrix@data)
+Ratings_distribution <- Ratings_distribution[Ratings_distribution != 0]
+ggplot() + aes(Ratings_distribution) +
+  geom_histogram(binwidth = 0.5) +
+  xlab("Ratings") +ylab("No. of Ratings")
+```
+
+
+As we can see, that the dataset consists of some sparse data, which would not be appropriate to build our model. Therefore, we would proceed with users and items with most information.
+
+
+```{r echo=TRUE}
+(movies <- Movie_Matrix[rowCounts(Movie_Matrix) > 50,
+                       colCounts(Movie_Matrix) > 50])
+```
+
+
+Now we have 378 users and 436 items.
+
+In general, any ratings matrix, especially movie ratings matrix, is bound to have some bias. Some users may give higher ratings than others.
+
+To see the bias distribution of ratings, we will plot average rating per user.
+
+```{r echo=TRUE}
+avg <- rowMeans(movies)
+ggplot() + aes(avg) +
+  geom_histogram(binwidth = 0.1) +
+  xlab("Average Rating") + ylab(" No. of Ratings")
+```
+
+
+We can see from the avg ratings distribution plot below that it varies a lot.
+
+# Data Normalization
+
+`recommender lab` normalizes the data when building a model. Let us normalize the ratings and confirm that all averages are 0 now to see what kind of effect it has.
+
+```{r echo=TRUE}
+movie_Normalization <- normalize(movies)
+avg <- round(rowMeans(movie_Normalization),5)
+table(avg)
+```
+
+
+
+
+```{r echo=TRUE}
+min_Items <- quantile(rowCounts(movies),0.95)
+min_Users <- quantile(colCounts(movies),0.95)
+
+image(movies[rowCounts(movies) >min_Items,
+             colCounts(movies) > min_Users],
+      main = "Heatmap of the Top Users and Movies (Non-Normalized")
+```
+
+
+
+
+
+```{r echo=TRUE}
+image(movie_Normalization [rowCounts(movie_Normalization ) > min_Items,
+                colCounts(movie_Normalization) > min_Users],
+      main = "Heatmap of the Top Users and Movies (Normalized)")
+```
+
+
+
+Reviewing rows in two heatmaps above, we can see that after normalization, the average rating is more uniform. Visually it does appear that bias is reduced.
+
+# Algorithms Used
+
+## Item-Item Collaborative Filtering
+
+
+Step 1) 
+
+Split the dataset into training set (80%) and testing set (20%).
+
+```{r echo=TRUE}
+set.seed(80)
+train_set <- sample(x= c(TRUE, FALSE), size = nrow(movies),
+                      replace = TRUE, prob = c(0.8, 0.2))
+
+movie_Train <- movies[train_set,]
+movie_Test <- movies[!train_set,]
+```
+
+
+
+### Training the model
+
+Step 2)
+
+Now, after splitting the dataset into training and test sets, let's create a model using training set.
+
+```{r echo=TRUE}
+(model <- Recommender(movie_Train, method = "IBCF"))
+```
+
+
+With `recommenderlab` package , we can train the model.
+
+### Examining the Similarity Matrix
+
+Step 3) By examining the similarity matrix, we can find top ten movies that are similar to other movies.
+
+
+```{r include=FALSE}
+ratings <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/ratings.csv") 
+
+movies <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/movies.csv")
+
+```
+
+
+
+```{r echo=TRUE}
+similarityMatrix <- getModel(model)$sim
+which_max <- order(colSums(similarityMatrix > 0), decreasing = TRUE)[1:10]
+topMovies <- as.data.frame(as.integer(rownames(similarityMatrix)[which_max]))
+colnames(topMovies) <- c("movieId")
+data <- topMovies %>% inner_join(movies, by = "movieId") %>% select(Movie = "title")
+knitr::kable(data, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+
+### Recommendations using test set
+
+```{r echo=TRUE}
+( pred <- predict(model, newdata = movie_Test, n = 6) )
+```
+
+Now, Let's extract recommenders
+
+Movie Ratings for first user
+
+```{r echo=TRUE}
+user1 <- as.data.frame(movie_Test@data[1,movie_Test@data[1,]>0])
+colnames(user1) <- c("Rating")
+user1[c("movieId")] <- as.integer(rownames(user1))
+data <- movies %>% 
+  inner_join(user1, by = "movieId") %>% 
+  select(Movie = "title", Rating) %>%
+  arrange(desc(Rating))
+knitr::kable(data, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+First user recommendations are as follows. Of course, this evaluation is highly subjective, but I would only question the recommendation of the first user.
+
+Recommendations for the first user
+
+```{r echo=TRUE}
+recommended <- pred@itemLabels[pred@items[[1]]]
+recommended <- as.data.frame(as.integer(recommended))
+colnames(recommended) <- c("movieId")
+data <- recommended %>% inner_join(movies, by = "movieId") %>% select(Movie = "title")
+knitr::kable(data, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+
+```
+
+## User-User Collaborative Filtering
+
+### Training the model
+
+
+Let's create a user based model using the training set.
+
+```{r echo=TRUE}
+( model <- Recommender(movie_Train, method = "UBCF") )
+```
+
+
+### Recommendations using test set
+
+```{r echo=TRUE}
+( pred <- predict(model, newdata = movie_Test, n = 6) )
+```
+
+
+Let us consider the first user and look at his/her recommendations. The first user gravitated towards more critically acclaimed dramas and these recommendations are among the best movies produced.
+
+```{r echo=TRUE}
+# Recommendations for the first user
+recommended <- pred@itemLabels[pred@items[[1]]]
+recommended <- as.data.frame(as.integer(recommended))
+colnames(recommended) <- c("movieId")
+data <- recommended %>% inner_join(movies, by = "movieId") %>% select(Movie = "title")
+knitr::kable(data, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+
+
+### Normalization Test
+
+Consider if we build the model without normalizing the data. Without normalization, recommendations include more usual suspects (movies very highly rated by majority of users) and therefore are more generic.
+
+```{r echo=TRUE}
+model <- Recommender(movie_Train, method = "UBCF", parameter = list(normalize = NULL))
+pred <- predict(model, newdata = movie_Test, n = 6)
+recommended <- pred@itemLabels[pred@items[[1]]]
+recommended <- as.data.frame(as.integer(recommended))
+colnames(recommended) <- c("movieId")
+data <- recommended %>% inner_join(movies, by = "movieId") %>% select(Movie = "title")
+knitr::kable(data, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+# Summary 
+
+For both Item-Item and User-User collaborative filtering, the recommendations which the first user got was almost similar. Movie ratings extracted for the first user consisted of drama genre movies. Therefore it was interesting to see that the movies recommended to the same user also consisted of drama genre movies.
+
+The algorithms are carried out using `recommenderlab` package in R. It is a basic recommender system. More development and testing would be needed for a usable recommender system.
+
+Comparing the results of UBCF with IBCF helps in understanding the algorithm better. UBCF needs to access the initial data, so it is a lazy-learning model. Since it needs to keep the entire database in memory, it doesn’t work well in the presence of a big rating matrix.
+
+However, UBCF’s accuracy is proven to be slightly more accurate than IBCF, so it’s a good option if the dataset is not too big.
+
+
+
+
+
+
+
+
