@@ -1,0 +1,294 @@
+---
+title: "DATA 612 Project 3 | Matrix Factorization methods"
+author: "Priya Shaji"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    df_print: paged
+    toc: true
+    toc_float: true
+    highlight: tango
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Objective
+
+• Your task is implement a matrix factorization method—such as singular value decomposition (SVD) or Alternating Least Squares (ALS)—in the context of a recommender system.
+
+• You may approach this assignment in a number of ways. You are welcome to start with an existing recommender system written by yourself or someone else. Remember as always to cite your sources, so that you can be graded on what you added, not what you found.
+
+
+# Introduction
+
+SVD can be thought of as a pre-processing step for feature engineering. You might easily start with thousands or millions of items, and use SVD to create a much smaller set of “k” items (e.g. 20 or 70).
+
+• This project is based on the work done in [Project 2](https://rpubs.com/Priya_Shaji/p2)
+
+• In this project we will add SVD to further explore the recommender system.
+I have used the `recommenderlab` package.
+
+# Data Preparation
+
+## Load the libraries
+
+
+```{r message=FALSE}
+library(recommenderlab)  
+library(dplyr)           
+library(tidyr)           
+library(ggplot2)         
+library(ggrepel)         
+library(tictoc)          
+```
+
+
+## Load the Data
+
+The data set is from MovieLens project and it was downloaded from 
+[Movie Lens] (https://grouplens.org/datasets/movielens/)
+
+
+```{r echo=TRUE}
+ratings <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/ratings.csv") 
+
+movies <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/movies.csv")
+
+```
+
+
+## Convert to Matrix
+
+```{r echo=TRUE}
+Movie_Matrix <- ratings %>%
+  select(-timestamp) %>%
+  spread(movieId, rating)
+
+row.names(Movie_Matrix) <- Movie_Matrix[,1]
+
+Movie_Matrix <- Movie_Matrix[-c(1)]
+Movie_Matrix <- as(as.matrix(Movie_Matrix), "realRatingMatrix")
+
+Movie_Matrix
+```
+
+
+Our movie matrix contains 610 users and 9,724 items/movies.
+
+## Train and Test Sets
+
+Now we will split our data into train and test sets
+
+
+```{r}
+set.seed(88)
+eval <- evaluationScheme(Movie_Matrix, method = "split",
+                         train = 0.8, given= 20, goodRating=3)
+train <- getData(eval, "train")
+known <- getData(eval, "known")
+unknown <- getData(eval, "unknown")
+```
+
+
+# Algorithms Used
+
+##  User-Based Collaborative Filtering
+
+Firstly, we will build a user-based collaborative filtering model.
+
+```{r}
+tic("UBCF Model - Training")
+modelUBCF <- Recommender(train, method = "UBCF")
+toc(log = TRUE, quiet = TRUE)
+
+tic("UBCF Model - Predicting")
+predUBCF <- predict(modelUBCF, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+( accUBCF <- calcPredictionAccuracy(predUBCF, unknown) )
+```
+
+
+## Singular Value Decomposition Model(SVD Model)
+
+Now we will build a SVD Model in order to compare this model with UBCF Model. For building SVD Model, we will generate a model with 50 concepts/categories. It will have all the required information and also has a lower value of RMSE and gives a reasonable processing time.
+
+```{r}
+tic("SVD Model - Training")
+modelSVD <- Recommender(train, method = "SVD", parameter = list(k = 50))
+toc(log = TRUE, quiet = TRUE)
+
+tic("SVD Model - Predicting")
+predSVD <- predict(modelSVD, newdata = known, type = "ratings")
+toc(log = TRUE, quiet = TRUE)
+
+( accSVD <- calcPredictionAccuracy(predSVD, unknown) )
+```
+
+
+
+As we can see RMSE is very similar to the UBCF model. On the surface these models appear to be similar.
+
+
+## Run-Time
+
+One major difference between SVD and UBCF Model is their run-times. 
+
+Let's explore their log displays to individually analyze their run-time.
+
+```{r}
+log <- as.data.frame(unlist(tic.log(format = TRUE)))
+colnames(log) <- c("Run Time")
+knitr::kable(log, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+
+As we can see from the log display of both the models:
+
+UBCF takes less time to build a model, but takes more resources making predictions while SVD model is the opposite - resource intensive to build a model, but quick to make predictions.
+
+# Evaluation
+
+Now let us evaluate our predictions by seeing the prediction matrix of a particular user.
+
+Here, let's see for user 400th.
+
+
+```{r}
+mov_rated <- as.data.frame(Movie_Matrix@data[c("400"), ]) 
+colnames(mov_rated) <- c("Rating")
+mov_rated$movieId <- as.integer(rownames(mov_rated))
+mov_rated <- mov_rated %>% filter(Rating != 0) %>% 
+  inner_join (movies, by="movieId") %>%
+  arrange(Rating) %>%
+  select(Movie = "title", Rating)
+knitr::kable(mov_rated, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+
+• As we see that user 400th movie likes comes under action , low on romantic , dramatic movie genre categories.
+
+
+• Now we can see the movies suggested by SVD to user 400th.
+
+
+```{r}
+mov_recommend <- as.data.frame(predSVD@data[c("400"), ]) 
+colnames(mov_recommend) <- c("Rating")
+mov_recommend$movieId <- as.integer(rownames(mov_recommend))
+mov_recommend <- mov_recommend %>% arrange(desc(Rating)) %>% head(6) %>% 
+  inner_join (movies, by="movieId") %>%
+  select(Movie = "title")
+knitr::kable(mov_recommend, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+                               
+```
+
+
+Therefore by analyzing top 6 movies being recommended to user 400th, we see that they also are action and drama genre movie categories.
+
+# Singular Value Decomposition(Manual)
+
+## Normalize Matrix
+
+Let us normalize the ratings matrix
+
+```{r}
+# Normalize matrix
+movieMatrix <- as.matrix(normalize(Movie_Matrix)@data)
+
+# Perform SVD
+movieSVD <- svd(movieMatrix)
+rownames(movieSVD$u) <- rownames(movieMatrix)
+rownames(movieSVD$v) <- colnames(movieMatrix)
+```
+
+
+As we have seen earlier, our data has 610 users. In order to be usable we need to reduce number of dimensions/concepts by setting some singular values in the diagonal matrix Σ to 0. 
+
+
+```{r}
+# Reduce dimensions
+n <- length(movieSVD$d)
+total_energy <- sum(movieSVD$d^2)
+for (i in (n-1):1) {
+  energy <- sum(movieSVD$d[1:i]^2)
+  if (energy/total_energy<0.9) {
+    n_dims <- i+1
+    break
+  }
+}
+```
+
+
+```{r}
+trim_mov_D <- movieSVD$d[1:n_dims]
+trim_mov_U <- movieSVD$u[, 1:n_dims]
+trim_mov_V <- movieSVD$v[, 1:n_dims]
+```
+
+As we had 610 users in our ratings matrix. and after reducing the dimensionality of the diagonal matrix Σ , we have 251 dimensions/concepts.
+
+```{r}
+head(trim_mov_D)
+```
+
+
+Consider two first concepts with singular values 76.2 and 43.6. Let us pick 5 movies with highest and lowest values in each concept and plot them.
+
+
+```{r include=FALSE}
+ratings <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/ratings.csv") 
+
+movies <- read.csv("https://raw.githubusercontent.com/PriyaShaji/Data612/master/Project_2/movies.csv")
+
+```
+
+```{r}
+mov_count <- 5
+
+movies_df <- as.data.frame(trim_mov_V) %>% select(V1, V2)
+movies_df$movieId <- as.integer(rownames(movies_df))
+
+mov_sample <- movies_df %>% arrange(V1) %>% head(mov_count)
+mov_sample <- rbind(mov_sample, movies_df %>% arrange(desc(V1)) %>% head(mov_count))
+mov_sample <- rbind(mov_sample, movies_df %>% arrange(V2) %>% head(mov_count))
+mov_sample <- rbind(mov_sample, movies_df %>% arrange(desc(V2)) %>% head(mov_count))
+mov_sample <- mov_sample %>% inner_join(movies, by = "movieId") %>% 
+  select(Movie = "title", Concept1 = "V1", Concept2 = "V2")
+mov_sample$Concept1 <- round(mov_sample$Concept1, 4)
+mov_sample$Concept2 <- round(mov_sample$Concept2, 4)
+
+knitr::kable(mov_sample, format = "html") %>%
+  kableExtra::kable_styling(bootstrap_options = c("striped", "hover"))
+```
+
+
+# Summary
+
+
+<strong>Collaborative Filtering:</strong>
+
+• It successfully avoids the problem posed by dynamic user preference as item-based CF is more static. 
+
+• However, several problems remain for this method. First, the main issue is scalability. The computation grows with both the customer and the product. The worst case complexity is O(mn) with m users and n items.
+
+
+<strong> Singular Value Decomposition: </strong>
+
+• SVD decreases the dimension of the utility matrix by extracting its latent factors.
+
+• SVD handles the problem of scalability and sparsity posed by CF successfully. However, SVD is not without flaw. The main drawback of SVD is that there is no to little explanation to the reason that we recommend an item to a user. This can be a huge problem if users are eager to know why a specific item is recommended to them. 
+
+
+
+# Reference
+
+[Introduction to Recommender System](https://hackernoon.com/introduction-to-recommender-system-part-1-collaborative-filtering-singular-value-decomposition-44c9659c5e75)
+
