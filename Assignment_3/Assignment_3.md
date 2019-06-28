@@ -1,0 +1,73 @@
+Research Discussion Assignment 3
+================
+
+## In what ways do you think Recommender Systems reinforce human bias?
+
+  - Today, recommendation engines are perhaps the biggest threat to
+    societal cohesion on the internet and, as a result, one of the
+    biggest threats to societal cohesion in the offline world, too.
+
+  - The recommendation engines we engage with are broken in ways that
+    have grave consequences: amplified conspiracy theories, gamified
+    news, nonsense infiltrating mainstream discourse, misinformed
+    voters. Recommendation engines have become The Great Polarizer.
+
+  - Any remedy for bias must start with awareness that bias exists; for
+    example, most mature societies raise awareness of social bias
+    through affirmative-action programs, and, while awareness alone does
+    not completely alleviate the problem, it helps guide us toward a
+    solution.
+
+## Reflecting on the techniques we have covered, do you think recommender systems reinforce or help to prevent unethical targeting or customer segmentation?
+
+  - The need to rethink the ethics of recommendation engines is only
+    growing more urgent as curatorial systems and AI crop up in
+    increasingly more sensitive places: local and national governments
+    are using similar algorithms to determine who makes bail, who
+    receives subsidies, and which neighborhoods need policing.
+
+  - Platforms need to transparently, thoughtfully, and deliberately take
+    ownership of this issue. Perhaps that involves creating a visible
+    list of “Do Not Amplify” topics in line with the platform’s values.
+    Perhaps it’s a more nuanced approach: inclusion in recommendation
+    systems is based on a quality indicator derived from a combination
+    of signals about the content, the way it’s disseminated (are bots
+    involved?), and the authenticity of the channel, group, or voice
+    behind it.
+
+  - Ultimately, we’re talking about choice architecture, a term for the
+    way that information or products are presented to people in a manner
+    that takes into account individual or societal welfare while
+    preserving consumer choice. The presentation of choices has an
+    impact on what people choose, and social networks’ recommender
+    systems are a key component of that presentation; they are already
+    curating the set of options.
+
+  - Giving people more control over what their algorithmic feed serves
+    up is one potential solution.
+
+## Please provide one or more examples to support your arguments.
+
+  - Project Redirect, an effort by Google Jigsaw, redirects certain
+    types of users who are searching YouTube for terrorist videos—people
+    who appear to be motivated by more than mere curiosity. Rather than
+    offer up more violent content, the approach of that recommendation
+    system is to do the opposite—it points users to content intended to
+    de-radicalize them. This project has been underway around violent
+    extremism for a few years, which means that YouTube has been aware
+    of the conceptual problem, and the amount of power their recommender
+    systems wield, for some time now. It makes their decision to address
+    the problem in other areas by redirecting users to Wikipedia for
+    fact-checking even more baffling.
+
+  - Twitter, for example, created a filter that enables users to avoid
+    content from low-quality accounts. Not everyone uses it, but the
+    option exists.
+
+## Reference
+
+\*[UP NEXT: A BETTER RECOMMENDATION
+SYSTEM](https://www.wired.com/story/creating-ethical-recommendation-engines/)
+
+\*[Bias on the
+Web](https://cacm.acm.org/magazines/2018/6/228035-bias-on-the-web/abstract)
