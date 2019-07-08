@@ -1,0 +1,110 @@
+---
+title: "Data 612 | Final Project Proposal"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::html_clean:
+    highlight: kate
+---
+
+<Strong>Donor matching recommender systems</strong>
+
+```{r knitr_init, cache=FALSE, include=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(echo=FALSE,
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+# Introduction
+
+In 2000, Charles Best, a teacher at a Bronx public high school, wanted his students to read Little House on the Prairie. As he was making photocopies of the one book he could procure, Charles thought about all the money he and his colleagues were spending on books, art supplies, and other materials. And he figured there were people out there who'd want to help — if they could see where their money was going. Charles sketched out a website where teachers could post classroom project requests, and donors could choose the ones they wanted to support. His colleagues posted the first 11 requests. Then it spread. Today, they're open to every public school in America.
+
+
+# Objective
+
+The objective of Donors recommender system is to recommend relevant items for users, based on their preference. Preference and relevance are subjective, and they are generally inferred by items users have consumed previously.
+
+DonorsChoose.org has funded over 1.1 million classroom requests through the support of 3 million donors, the majority of whom were making their first-ever donation to a public school. If DonorsChoose.org can motivate even a fraction of those donors to make another donation, that could have a huge impact on the number of classroom requests fulfilled.
+
+A good solution will enable DonorsChoose.org to build targeted email campaigns recommending specific classroom requests to prior donors.
+
+
+# Data Description
+
+The dataset is chosen from the donors choose dataset [DonorsChoose](https://www.donorschoose.org) dataset
+
+A combined dataset will be prepared with the projects, donations, donors, schools and teachers datasets.
+
+```{r warning=FALSE}
+library(tidyverse) #  data manipulation and graphs
+library(caret)
+library(data.table)
+library(stringr)
+library(lubridate)
+
+#For maps
+library(leaflet)
+library(rgdal)
+
+library(tidytext)
+library(wordcloud)
+
+library(text2vec)
+library(Matrix)
+```
+
+
+```{r echo=TRUE}
+donations <- read.csv("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Donations.csv")
+```
+
+```{r echo=TRUE}
+glimpse(donations)
+```
+
+
+# Recommender System
+
+Donors are similar to users or customers of a online platform providing various products. Let's take a music site for example: when a user named Aimee listened to one or more songs at our site, we will be able to recommend more songs to her based on her listening history and the listening history of people who are similar to her. Similarly, once a donor named Alice donated to one or more projects at DonorsChoose.org, we will be able to recommend more projects to her based on her donation history and the donation history of other donors who are similar to her.
+
+
+# Implementation Structure
+
+1) Combining 5 datasets: projects, donations, donors, schools and teachers datasets.
+
+2) I plan to leverage a distributed computing framework such as Spark to aid in the execution time of our model. Specifically packages like Sparklyr, Databricks, H20 etc. 
+
+3) Preparing non-textual features
+
+4) Cosine similarity between 2 donors
+
+5) Using recommendation algorithms
+
+6) Combining text and non-text features
+
+7) Recommendations using non-text features
+
+8) Recommendations using text features
+
+9) Evaluation
+
+# Results
+
+Determining the recommendation techniques which achieved highest accuracy.
+
+# References
+
+[Introduction to recommendation systems and How to design Recommendation system,that resembling the Amazon](https://medium.com/@madasamy/introduction-to-recommendation-systems-and-how-to-design-recommendation-system-that-resembling-the-9ac167e30e95)
+ 
+ 
+[System and method for matching donors and charities](https://patents.google.com/patent/US20030229507A1/en)
+
