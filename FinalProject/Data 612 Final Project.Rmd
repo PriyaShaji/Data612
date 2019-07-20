@@ -1,0 +1,947 @@
+
+---
+title: "DATA 612 Final Project | Donor matching recommender systems"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown:
+    highlight: tango
+---
+
+
+
+```{r knitr_init, cache=FALSE, include=FALSE}
+library(knitr)
+library(rmdformats)
+
+## Global options
+options(max.print="75")
+opts_chunk$set(
+	             cache=TRUE,
+               prompt=FALSE,
+               tidy=TRUE,
+               comment=NA,
+               message=FALSE,
+               warning=FALSE)
+opts_knit$set(width=75)
+```
+
+
+# Introduction
+
+In 2000, Charles Best, a teacher at a Bronx public high school, wanted his students to read Little House on the Prairie. As he was making photocopies of the one book he could procure, Charles thought about all the money he and his colleagues were spending on books, art supplies, and other materials. And he figured there were people out there who'd want to help — if they could see where their money was going. Charles sketched out a website where teachers could post classroom project requests, and donors could choose the ones they wanted to support. His colleagues posted the first 11 requests. Then it spread. Today, they're open to every public school in America.
+
+
+# Objective
+
+The objective of Donors recommender system is to recommend relevant items for users, based on their preference. Preference and relevance are subjective, and they are generally inferred by items users have consumed previously.
+
+DonorsChoose.org has funded over 1.1 million classroom requests through the support of 3 million donors, the majority of whom were making their first-ever donation to a public school. If DonorsChoose.org can motivate even a fraction of those donors to make another donation, that could have a huge impact on the number of classroom requests fulfilled.
+
+A good solution will enable DonorsChoose.org to build targeted email campaigns recommending specific classroom requests to prior donors.
+
+
+# Data Description
+
+## Connect with a local spark instance
+
+```{r,message=FALSE,warning=FALSE}
+library(sparklyr)
+library(dplyr)
+sc <- spark_connect(master = "local")
+```
+
+
+The returned Spark connection (sc) provides a remote dplyr data source to the Spark cluster.
+
+## Load the required libraries
+
+```{r message=FALSE, warning=FALSE}
+
+#  Data manipulation and graphs
+library(tidyverse) 
+library(caret)
+library(data.table)
+library(stringr)
+library(lubridate)
+
+# For maps
+library(leaflet)
+library(rgdal)
+
+library(tidytext)
+library(wordcloud)
+
+library(text2vec)
+library(Matrix)
+library(dplyr)
+library(stopwords)
+```
+
+## Load the donors dataset
+
+The dataset is chosen from the donors choose dataset [DonorsChoose](https://www.donorschoose.org) dataset
+
+A combined dataset will be prepared with the projects, donations, donors, schools and teachers datasets.
+
+
+```{r,message=FALSE,warning=FALSE}
+rm(list=ls())
+
+fillColor = "#FFA07A"
+fillColor2 = "#F1C40F"
+fillColorLightCoral = "#F08080"
+
+
+donations <- as.tibble(fread("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Datasets/Donations.csv"))
+
+donors <- as.tibble(fread("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Datasets/Donors.csv"))
+
+projects <- read_csv("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Datasets/Projects.csv",col_types = cols(
+   X1 = col_integer(),
+  `Project ID` = col_character(),
+  `School ID` = col_character(),
+  `Teacher ID` = col_character(),
+  `Teacher Project Posted Sequence` = col_integer(),
+  `Project Type` = col_character(),
+  `Project Title` = col_character(),
+  `Project Essay` = col_character(),
+  `Project Subject Category Tree` = col_character(),
+  `Project Subject Subcategory Tree` = col_character(),
+  `Project Grade Level Category` = col_character(),
+  `Project Resource Category` = col_character(),
+  `Project Cost` = col_character(),
+  `Project Posted Date` = col_date(format = ""),
+  `Project Current Status` = col_character(),
+  `Project Fully Funded Date` = col_date(format = "")))
+
+schools <- read_csv("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Datasets/Schools.csv")
+
+teachers <- read_csv("/Users/priyashaji/Documents/cuny msds/Summer'19/data 612/Final Project/Datasets/Teachers.csv")
+
+projects <- projects %>%
+  rename(ProjectType = `Project Type`) %>%
+  rename(Category = `Project Subject Category Tree`) %>%
+  rename(SubCategory =`Project Subject Subcategory Tree`) %>%
+  rename(Grade =`Project Grade Level Category`) %>%
+  rename(ResourceCategory = `Project Resource Category`) %>%
+  rename(Cost = `Project Cost`) %>%
+  rename(PostedDate = `Project Posted Date`) %>%
+  rename(CurrentStatus = `Project Current Status`) %>%
+  rename(FullyFundedDate = `Project Fully Funded Date`)
+
+donations <- donations %>%
+  rename(DonationAmount = `Donation Amount`)
+
+donors <- donors %>%
+  rename(DonorState = `Donor State`)
+
+projects <- projects %>%
+  rename(ProjectTitle = `Project Title`)
+
+```
+
+<strong> Copying the datasets to spark instance</strong>
+
+```{r ,message=FALSE,warning=FALSE,eval=FALSE}
+donations <- copy_to(sc,donations)
+```
+
+```{r ,message=FALSE,warning=FALSE,eval=FALSE}
+projects <- copy_to(sc,projects)
+```
+
+
+```{r,message=FALSE,warning=FALSE,eval=FALSE}
+teachers <- copy_to(sc,teachers)
+```
+
+
+```{r,message=FALSE,warning=FALSE,eval=FALSE}
+schools <- copy_to(sc,schools)
+```
+
+```{r,message=FALSE,warning=FALSE,eval=FALSE}
+donors <- copy_to(sc,donors)
+```
+
+
+## Glimpse of data
+
+<strong> Donations </strong>
+
+```{r,message=FALSE,warning=FALSE}
+glimpse(donations)
+```
+
+
+<strong> Donors </strong>
+
+```{r,message=FALSE,warning=FALSE}
+glimpse(donors)
+```
+
+
+<strong> Project </strong>
+
+```{r,message=FALSE,warning=FALSE}
+glimpse(projects)
+
+project_char <- data.frame(lapply(projects, as.character), stringsAsFactors=FALSE)
+
+glimpse(project_char)
+
+```
+
+
+<strong> Schools </strong>
+
+```{r,message=FALSE,warning=FALSE}
+glimpse(schools)
+```
+
+
+<strong> Teachers </strong>
+
+```{r,message=FALSE,warning=FALSE}
+glimpse(teachers)
+```
+
+
+## Combining 5 datasets
+
+A combined dataset is prepared with the projects, donations, donors, schools and teachers datasets.
+
+```{r,message=FALSE,warning=FALSE}
+projects_sample <- head(projects,5e3)
+projects_sample_donations <- inner_join(projects_sample,donations)
+projects_sample_donations_donors <- inner_join(projects_sample_donations,donors)
+projects_sample_donations_donors_teachers <- inner_join(projects_sample_donations_donors,teachers,
+                                                        by =c("Teacher ID"))
+projects_sample_donations_donors_teachers_schools <- inner_join(projects_sample_donations_donors_teachers,
+                                                                schools,by=c("School ID"))
+combined_sample <-projects_sample_donations_donors_teachers_schools
+glimpse(combined_sample)
+```
+
+
+# Preparing the Non-Text features
+
+In the combined dataset the non-textual features are
+
+Category,SubCategory,Grade,ResourceCategory,SchoolState, TeacherPrefix features.
+
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample <- combined_sample %>%
+  rename(TeacherPrefix = "Teacher Prefix",
+         SchoolName = "School Name",SchoolMetroType= "School Metro Type",
+         SchoolState= "School State",
+         SchoolCity = "School City",SchoolDistrict = "School District")
+         
+combined_sample2 <- combined_sample %>%
+  select("Project ID",                       
+         "ProjectType",      
+         "ProjectTitle","Project Essay",
+         "Category","SubCategory"  ,                      
+         "Grade" ,"ResourceCategory" ,   
+         "Donor ID",                         
+         "TeacherPrefix",
+         "SchoolState")
+
+
+dummies <- dummyVars(~ Category + SubCategory + Grade + ResourceCategory + SchoolState + TeacherPrefix,
+data = combined_sample)
+
+projects_ohe <- as.data.frame(predict(dummies, newdata = combined_sample))
+projects_ohe[is.na(projects_ohe)] <- 0
+names(projects_ohe)<-make.names(names(projects_ohe),unique = TRUE)
+
+category_features <- c("Category","SubCategory","Grade","ResourceCategory", "SchoolState","TeacherPrefix")
+         
+combined_sample2 <- cbind(combined_sample2[,-c(which(colnames(combined_sample2) %in% category_features))],
+                         projects_ohe)
+
+combined_sample3 <- combined_sample2 %>%
+  select(-`Donor ID`,-`Project Essay`,-ProjectTitle,-`Project ID`)
+
+features <- colnames(combined_sample3)
+
+for (f in features) {
+  if ((class(combined_sample3[[f]])=="factor") || (class(combined_sample3[[f]])=="character")) {
+    levels <- unique(combined_sample3[[f]])
+    combined_sample3[[f]] <- as.numeric(factor(combined_sample3[[f]], levels=levels))
+  }
+}
+
+
+```
+
+
+# Cosine Similarity between two donors
+
+The cosine similiarity helps to determine whether the items requested is similar or not.
+
+It is thus a judgment of orientation and not magnitude: two vectors with the same orientation have a cosine similarity of 1, two vectors at 90Â° have a similarity of 0, and two vectors diametrically opposed have a similarity of -1, independent of their magnitude. 
+
+Here we want to compare the projects how similiar they are to each other. If they are similiar, then the donor is Recommended the similiar project.
+
+
+# Recommendations using Text Features
+
+Let us use the Project Title and Projects Essays to find similiarities between projects using the TFIDF concept and cosine similiarity
+
+Create a vocabulary-based DTM. Here we collect unique terms from all documents and mark each of them with a unique ID using the create_vocabulary() function. An iterator was used to create the vocabulary. Vocabulary is also pruned to reduce the terms in the matrix.
+
+The greater is the value of the cosine, the greater is the similiarity between the projects. The similiar projects are the candidates for recommendation.
+
+```{r,message=FALSE,warning=FALSE}
+combined_train_text = paste(combined_sample2$ProjectTitle,
+                             combined_sample2$`Project Essay`)
+ 
+ prep_fun  = function(x) {
+   stringr::str_replace_all(tolower(x), "[^[:graph:]]", " ")
+ }
+ 
+ myTokeniser <- function(str) 
+   str %>%
+   stringr::str_replace_all('[\']|[â]', ' ') %>%
+   tokenizers::tokenize_words(., stopwords = stopwords(language ="en"))
+ 
+ tok_fun = myTokeniser
+ 
+ 
+ it_train = itoken(combined_train_text, 
+                   preprocessor = prep_fun, 
+                   tokenizer = tok_fun, 
+                   ids = combined_sample2$`Project ID`, 
+                   progressbar = FALSE)
+ 
+ vocab = create_vocabulary(it_train, ngram = c(1L,3L),
+                           stopwords = stopwords("en"))
+
+
+```
+
+
+
+## Prune the vocabulary to eliminate the unnecessary words.
+
+```{r,message=FALSE,warning=FALSE}
+vocab = vocab %>% prune_vocabulary(term_count_min = 10, 
+                                   doc_proportion_max = 0.5,
+                                   doc_proportion_min = 0.01,
+                                   vocab_term_max = 5000)
+
+vocab
+```
+
+
+## Create the Document Term Matrix(DTM)
+
+Create the Document Term Matrix.
+
+```{r,message=FALSE,warning=FALSE}
+
+vectorizer = vocab_vectorizer(vocab)
+
+dtm_train = create_dtm(it_train, vectorizer)
+```
+
+
+## TF-IDF
+
+Let's do a TF-IDF to increase the weight of terms which are specific to a single document or handful of documents and decrease the weight for terms used in most documents
+
+
+```{r,message=FALSE,warning=FALSE}
+# define tfidf model
+tfidf = TfIdf$new(norm = "l2", sublinear_tf = T)
+
+# fit model to train data and transform train data with fitted model
+dtm_train_tfidf = fit_transform(dtm_train, tfidf)
+```
+
+
+## Cosine similiarity between project 1 and Project 1 using Text Features only
+
+Here I choose an example to compare similiarities using Text Features only between projects 1 and 1
+
+```{r,message=FALSE,warning=FALSE}
+getCosine <- function(x,y) 
+{
+  this.cosine <- sum(x*y) / (sqrt(sum(x*x)) * sqrt(sum(y*y)))
+  return(this.cosine)
+}
+
+
+getCosine(dtm_train_tfidf[1,],dtm_train_tfidf[1,])
+```
+
+
+## Cosine similiarity between project 1 and Project 2
+
+Here I choose an example to compare similiarities using Text Features only between projects 1 and 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[1,],dtm_train_tfidf[2,])
+
+```
+
+
+## Cosine similiarity between project 1 and Project 50
+
+Here I choose an example to compare similiarities using Text Features only between projects 1 and 50
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[1,],dtm_train_tfidf[50,])
+```
+
+
+## Cosine similiarity between project 1 and Project 100
+
+Here I choose an example to compare similiarities using Text Features only between projects 1 and 100
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[1,],dtm_train_tfidf[100,])
+```
+
+
+
+## Cosine similiarity of projects of the same donor
+
+Let's find the projects associated with the same donor. In the following code section, we find Sample 1 , 2 and 3 of the same donors.
+
+```{r,message=FALSE,warning=FALSE}
+donations_project_group <- combined_sample %>%
+  group_by(`Donor ID`) %>%
+  summarise(Count = n())
+
+donations_project_group <- donations_project_group %>%
+  filter(Count > 1)
+
+same_donor <- which(combined_sample$`Donor ID` == donations_project_group[1,]$`Donor ID`)
+
+same_donor2 <- which(combined_sample$`Donor ID` == donations_project_group[2,]$`Donor ID`)
+
+same_donor3 <- which(combined_sample$`Donor ID` == donations_project_group[3,]$`Donor ID`)
+```
+
+
+<strong>Same Donors Sample 1</strong>
+
+Choose Sample 1 Same Donors
+
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor[1],] %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor[2],]  %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+
+<strong>Cosine Similiarity Same Donors Sample 1</strong>
+
+Calculation of Cosine similiarity of projects belonging to same donor Sample 1
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[same_donor[1],],dtm_train_tfidf[same_donor[2],])
+```
+
+
+<strong>Same Donors Sample 2</strong>
+
+Choose Sample 2 Same Donors
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor2[1],] %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor2[2],]  %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+
+<strong>Cosine Similiarity Same Donors Sample 2</strong>
+
+Calculation of Cosine similiarity of projects belonging to same donor Sample 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[same_donor2[1],],dtm_train_tfidf[same_donor2[2],])
+```
+
+
+<strong>Same Donors Sample 3</strong>
+
+Choose Sample 3 Same Donors
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor3[1],] %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample[same_donor3[2],]  %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+         kable()
+```
+
+
+<strong>Cosine Similiarity Same Donors Sample 3</strong>
+
+Calculation of Cosine similiarity of projects belonging to same donor Sample 3
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(dtm_train_tfidf[same_donor3[1],],dtm_train_tfidf[same_donor3[2],])
+
+```
+
+
+#  Combining the Text and Non Text Features
+
+```{r,message=FALSE,warning=FALSE}
+combined_non_text_sample <- combined_sample3 %>% 
+  replace_na(list(SchoolPercentageFreeLunch = -1, ItemName=-1,SchoolID = -1, TeacherID = -1, ProjectType = -1,Category = -1,SubCategory = -1, Grade = -1, ResourceCategory = -1,Cost = -1,TeacherPrefix =-1,SchoolName =-1,SchoolMetroType =-1,SchoolState = -1,SchoolCity = -1,SchoolDistrict =-1,Qty=-1,UnitPrice=-1,Amount=-1)) %>%
+  sparse.model.matrix(~ . - 1, .)
+
+combined_sample4 <- combined_non_text_sample %>%
+  cbind(dtm_train_tfidf)
+
+```
+
+
+# Recommendations using Non Text Features only
+
+The Non Text features include Category,SubCategory,Grade,ResourceCategory,SchoolState, TeacherPrefix
+
+
+## Cosine similiarity between project 1 and Project 2
+
+Here I choose an example to compare similiarities using Non Text Features between projects 1 and 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[1,],combined_non_text_sample[2,])
+```
+
+## Cosine similiarity between project 1 and Project 50
+
+Here I choose an example to compare similiarities using Non Text Features between projects 1 and 50
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[1,],combined_non_text_sample[50,])
+```
+
+
+## Cosine similiarity between project 1 and Project 100
+
+Here I choose an example to compare similiarities using Non Text Features between projects 1 and 100
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[1,],combined_non_text_sample[100,])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 1
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[same_donor[1],],combined_non_text_sample[same_donor[2],])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[same_donor2[1],],combined_non_text_sample[same_donor2[2],])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 3
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_non_text_sample[same_donor3[1],],combined_non_text_sample[same_donor3[2],])
+```
+
+
+## Top 10 recommended Projects
+
+The recommendations using Non Text Features
+
+## Donor 1 Projects
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample %>%
+head(1) %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+unique()  %>%
+kable()
+```
+
+
+This lists down the Top 10 Recommended Projects for Donor 1
+
+```{r,message=FALSE,warning=FALSE}
+counter_vector  <- c()
+cosine_vector <- c()
+ProjectID <- c()
+Category <- c()
+SubCategory <- c()
+Grade <- c()
+ResourceCategory <- c()
+SchoolState <- c()
+TeacherPrefix <- c()
+
+for(counter in 2:102)
+{
+ 
+ cosine_sim <- getCosine(combined_non_text_sample[1,],combined_non_text_sample[counter,])
+ counter_vector <- c(counter_vector,counter)
+ cosine_vector <- c(cosine_vector,cosine_sim)
+ ProjectID <- c(ProjectID,combined_sample[counter,]$`Project ID`)
+ Category <- c(Category,combined_sample[counter,]$Category)
+ SubCategory <- c(SubCategory,combined_sample[counter,]$SubCategory)
+ Grade <- c(Grade,combined_sample[counter,]$Grade)
+ ResourceCategory <- c(ResourceCategory,combined_sample[counter,]$ResourceCategory)
+ SchoolState <-  c(SchoolState,combined_sample[counter,]$SchoolState)
+TeacherPrefix <-  c(TeacherPrefix,combined_sample[counter,]$TeacherPrefix)
+}
+
+df <- data.frame(cbind(counter_vector,cosine_vector,ProjectID,Category,SubCategory,Grade,ResourceCategory,
+                       SchoolState,TeacherPrefix))
+
+df <- df %>%
+arrange(desc(cosine_vector)) 
+
+
+donor_project_id <- combined_sample %>%
+head(1) %>%
+select(`Project ID`)
+
+df %>%
+filter(ProjectID != donor_project_id$`Project ID` ) %>%
+select(cosine_vector,ProjectID,Category,SubCategory,Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+unique()  %>%
+  head(10) %>%
+kable()
+```
+
+
+# Recommendations using Text and Non Text Features
+
+## Cosine similiarity between project 1 and Project 2
+
+Here I choose an example to compare similiarities using Text and Non Text Features between projects 1 and 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[1,],combined_sample4[2,])
+```
+
+
+## Cosine similiarity between project 1 and Project 50
+
+Here I choose an example to compare similiarities using Text and Non Text Features between projects 1 and 50
+
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[1,],combined_sample4[50,])
+```
+
+
+##  Cosine similiarity between project 1 and Project 100
+
+Here I choose an example to compare similiarities using Text and Non Text Features between projects 1 and 100
+
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[1,],combined_sample4[100,])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 1
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[same_donor[1],],combined_sample4[same_donor[2],])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 2
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[same_donor2[1],],combined_sample4[same_donor2[2],])
+```
+
+
+## Cosine Similiarity of projects of same donor Sample 3
+
+```{r,message=FALSE,warning=FALSE}
+getCosine(combined_sample4[same_donor3[1],],combined_sample4[same_donor3[2],])
+```
+
+## Top 10 recommended Projects
+
+The recommendations using Text and Non Text Features
+
+
+## Donor 1 Projects
+
+
+```{r,message=FALSE,warning=FALSE}
+combined_sample %>%
+head(1) %>%
+select(`Donor ID`,`Project ID`,ProjectTitle,Category,SubCategory,                      
+         Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+unique()  %>%
+kable()
+```
+
+
+This lists down the Top 10 Recommended Projects for Donor 1
+
+ 
+```{r,message=FALSE,warning=FALSE}
+
+counter_vector  <- c()
+cosine_vector <- c()
+ProjectID <- c()
+Category <- c()
+SubCategory <- c()
+Grade <- c()
+ResourceCategory <- c()
+SchoolState <- c()
+TeacherPrefix <- c()
+
+for(counter in 2:102)
+{
+ 
+ cosine_sim <- getCosine(combined_sample4[1,],combined_sample4[counter,])
+ counter_vector <- c(counter_vector,counter)
+ cosine_vector <- c(cosine_vector,cosine_sim)
+ ProjectID <- c(ProjectID,combined_sample[counter,]$`Project ID`)
+ Category <- c(Category,combined_sample[counter,]$Category)
+ SubCategory <- c(SubCategory,combined_sample[counter,]$SubCategory)
+ Grade <- c(Grade,combined_sample[counter,]$Grade)
+ ResourceCategory <- c(ResourceCategory,combined_sample[counter,]$ResourceCategory)
+ SchoolState <-  c(SchoolState,combined_sample[counter,]$SchoolState)
+TeacherPrefix <-  c(TeacherPrefix,combined_sample[counter,]$TeacherPrefix)
+}
+
+df <- data.frame(cbind(counter_vector,cosine_vector,ProjectID,Category,SubCategory,Grade,ResourceCategory,
+                       SchoolState,TeacherPrefix))
+
+df <- df %>%
+arrange(desc(cosine_vector)) 
+
+
+donor_project_id <- combined_sample %>%
+head(1) %>%
+select(`Project ID`)
+
+df %>%
+filter(ProjectID != donor_project_id$`Project ID` ) %>%
+select(cosine_vector,ProjectID,Category,SubCategory,Grade,ResourceCategory,SchoolState,TeacherPrefix) %>%
+unique()  %>%
+  head(10) %>%
+kable()
+
+```
+
+
+# Conclusion
+
+I did the Item Item Recommendations using
+
+Text Features Only
+
+Text and Non Text Features
+
+Non Text Features only . 
+
+The Non Text features include Category,SubCategory,Grade,ResourceCategory,SchoolState, TeacherPrefix
+
+The accuracy is highest for the recommendations using the Non Text Features only.
+
+# Projects with more than 1 Donor
+
+I choose the Projects with more than one donor.
+
+```{r,message=FALSE,warning=FALSE}
+donations = donations %>%
+rename(DonorID = `Donor ID`, ProjectID = `Project ID`)
+
+donations_project_group <- donations %>%
+group_by(ProjectID) %>%
+summarise(Count = n())
+
+donations_project_group <- donations_project_group %>% filter(Count > 1)
+
+donations_sample <- donations %>%
+filter(ProjectID %in% donations_project_group$ProjectID) %>%
+head(10e3)
+```
+
+
+# Donor ID Project ID matrix
+
+Let's create a Dataframe with Donor ID, Project ID and the Donation Amount. I will do log transformation of the Donation Amount.
+
+```{r,message=FALSE,warning=FALSE}
+donations_sample_group <- donations_sample %>%
+group_by(DonorID,ProjectID) %>%
+summarise(Rating =  sum(DonationAmount)) %>%
+ungroup()
+
+donations_sample_group$Rating <-  log(donations_sample_group$Rating +1)
+
+glimpse(donations_sample_group)
+```
+
+
+# Restructuring the matrix
+ 
+The matrix is created with Donor Names along the rows and Project IDS along the columns.
+
+```{r,message=FALSE,warning=FALSE}
+dimension_names <- list(DonorID = sort(unique(donations_sample_group$DonorID)),ProjectID = sort(unique(donations_sample_group$ProjectID)))
+
+ratingmat <- spread(select(donations_sample_group, ProjectID, DonorID, Rating),ProjectID, Rating) %>% select(-DonorID)
+
+ratingmat <- as.matrix(ratingmat)
+dimnames(ratingmat) <- dimension_names
+ratingmat[1:5,1:5]
+```
+
+
+# Using SVD
+
+## Donor Project Matrix dimensions
+
+The NA values are replaced by zero since SVD does not work with NA values.
+
+```{r,message=FALSE,warning=FALSE}
+ratingmat0 <- ratingmat
+ratingmat0[is.na(ratingmat0)] <- 0
+
+dim(ratingmat0)
+```
+
+
+## Dimensionality reduction using SVD
+
+The first 20 factors are taken into consideration
+
+```{r,message=FALSE,warning=FALSE}
+svd1 <- svd(ratingmat0)
+approx20 <- svd1$u[, 1:20] %*% diag(svd1$d[1:20]) %*% t(svd1$v[, 1:20])
+dimnames(approx20) <- dimension_names
+
+dim(approx20)
+```
+
+
+```{r,message=FALSE,warning=FALSE}
+approx20[1:10,1:10]
+```
+
+
+# Recommendations for Donor 3
+
+## Donor 3 Projects
+
+Now according to the prior projects chosen by donor 3, the recommender system would recommend a project for the 3rd donor.
+
+```{r warning=FALSE, include=FALSE, paged.print=FALSE, r,message=FALSE}
+ProjectIDs <- donations_sample_group %>%
+  filter(DonorID == '00125f251b05d9e447a5448bef981028') %>%
+  select(ProjectID)
+  
+  projects %>%
+  filter(`Project ID` %in% ProjectIDs$ProjectID) %>%
+  select(`Project ID`,Category,SubCategory,Grade,ResourceCategory)
+```
+
+
+## Top Recommended projects for Donor 3
+
+```{r,message=FALSE,warning=FALSE}
+df <- approx20[3,]
+df <- as.data.frame(df)
+
+df$ProjectID <- NULL
+df$ProjectID <- row.names(df)
+
+df<- df %>%
+  dplyr::rename(Rating = df)
+
+df <- df %>%
+  arrange(-Rating) %>%
+  head(10)
+
+
+'%!in%' <- function(x,y)!('%in%'(x,y))
+
+projects %>%
+  filter(`Project ID` %in% df$ProjectID) %>%
+  filter(`Project ID` %!in% ProjectIDs$ProjectID)  %>%
+  select(`Project ID`,Category,SubCategory,Grade,ResourceCategory) %>%
+  kable()
+```
+
+
+# Summary
+
+We did the Item Item Recommendations using
+
+Text Features Only using the Project Title and Projects Essays
+The Non Text features include Category,SubCategory,Grade,ResourceCategory,SchoolState, TeacherPrefix
+* Text and Non Text Features.
+
+Non Text Features only
+
+The accuracy is highest for the recommendations using the Non Text Features only.
+
+We also did the User User Recommnedations using the Users and the Amount.
+
+
+# References
+
+[Introduction to recommendation systems and How to design Recommendation system,that resembling the Amazon](https://medium.com/@madasamy/introduction-to-recommendation-systems-and-how-to-design-recommendation-system-that-resembling-the-9ac167e30e95)
+ 
+ 
+[System and method for matching donors and charities](https://patents.google.com/patent/US20030229507A1/en)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
